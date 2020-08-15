@@ -1,0 +1,47 @@
+version: '3.4'
+services:
+  apache:
+    volumes:
+      - ./infrastructure/containers/apache/config/vhost:/etc/apache2/sites-enabled
+      - ./app:/var/www/app
+  php:
+    build:
+      target: development
+    image: php:local
+    volumes:
+      - ./app:/var/www/app
+      - /home/vagrant:/home/vagrant
+    environment:
+      - APP_ENV=dev
+    depends_on:
+      - mysql
+  mysql:
+    image: mariadb:10.0.17
+    container_name: mysql
+    networks:
+      - app
+    ports:
+      - 3306:3306
+    volumes:
+      - /var/data/mysql:/var/lib/mysql
+    command:
+      - "--default-authentication-plugin=mysql_native_password"
+      - "--lower_case_table_names=1"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ne-core
+      MYSQL_USER: ne-core
+      MYSQL_PASSWORD: password
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+    ports:
+      - 8080:80
+    networks:
+      - app
+networks:
+  app:
+    driver: bridge

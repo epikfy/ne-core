@@ -1,0 +1,72 @@
+name: Laravel
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  laravel-tests:
+
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./app
+    steps:
+    - uses: actions/checkout@v2
+    - name: Copy .env
+      env:
+        env_file: ${{ secrets.DEPLOY_ENV }}
+      run: echo "$env_file" > ./.env
+    - name: Install Dependencies
+      run: composer install -q --no-ansi --no-interaction --no-scripts --no-suggest --no-progress --prefer-dist
+    - name: Clean and config caches
+      run: php artisan optimize
+    - name: Clean app cache
+      run: php artisan cache:clear
+    - name: Clean config cache
+      run: php artisan config:clear
+    - name: Directory Permissions
+      run: chmod -R 777 storage bootstrap/cache
+    - name: passport keys 1
+      run: echo "${{ secrets.PASSPORT_PRIVATE }}" > ./storage/oauth-private.key
+    - name: passport keys 2
+      run: echo "${{ secrets.PASSPORT_PUBLIC }}" > ./storage/oauth-public.key
+    - name: Build process
+      working-directory: ./
+      run: |
+        rm ./docker-compose.override.yaml
+        docker-compose build
+    - name: Log into registry
+      run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u ${{ secrets.DOCKER_USERNAME }} --password-stdin
+
+    - name: Push image
+      run: |
+        IMAGE_PHP_ID=docker.pkg.github.com/${{ secrets.DOCKER_USERNAME }}/ne-core-backend/php_core:latest
+        IMAGE_APACHE_ID=docker.pkg.github.com/${{ secrets.DOCKER_USERNAME }}/ne-core-backend/apache_core:latest
+
+        docker tag php:local $IMAGE_PHP_ID
+        docker push $IMAGE_PHP_ID
+
+        docker tag apache:local $IMAGE_APACHE_ID
+        docker push $IMAGE_APACHE_ID
+    - name: Deploy stack
+      uses: appleboy/ssh-action@master
+      env:
+        DOCKER_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        DOCKER_USER: ${{ secrets.DOCKER_USERNAME }}
+      with:
+        host: ${{ secrets.DEPLOY_HOST }}
+        username: ${{ secrets.DEPLOY_USER }}
+        key: ${{ secrets.DEPLOY_KEY }}
+        port: ${{ secrets.DEPLOY_PORT }}
+        envs: DOCKER_TOKEN,DOCKER_USER
+        script: |
+          IMAGE_PHP_ID=docker.pkg.github.com/$DOCKER_USER/ne-core-backend/php_core:latest
+          IMAGE_APACHE_ID=docker.pkg.github.com/$DOCKER_USER/ne-core-backend/apache_core:latest
+          echo "$DOCKER_TOKEN" | sudo docker login docker.pkg.github.com -u $DOCKER_USER --password-stdin
+          sudo docker pull $IMAGE_PHP_ID
+          sudo docker pull $IMAGE_APACHE_ID
+          cd ~
+          sudo docker stack rm api-core
+          sleep 40
+          sudo docker stack deploy -c core-stack.yml api-core
